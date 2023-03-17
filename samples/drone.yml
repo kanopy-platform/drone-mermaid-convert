@@ -1,0 +1,136 @@
+---
+kind: pipeline
+type: kubernetes
+name: testing
+
+trigger:
+  branch: [master]
+  event: [pull_request]
+
+steps:
+  - name: test
+    image: python:3.9
+  - name: build-run-test
+    image: plugins/kaniko-ecr
+---
+kind: pipeline
+type: kubernetes
+name: publish-amd64
+platform:
+  arch: amd64
+
+trigger:
+  branch: [master]
+  event: [push, tag]
+
+steps:
+  - name: snyk
+  - name: publish-staging
+  - name: publish-prod
+
+---
+kind: pipeline
+type: kubernetes
+name: publish-arm64
+platform:
+  arch: arm64
+
+trigger:
+  branch: [master]
+  event: [push, tag]
+
+steps:
+  - name: publish-staging
+  - name: publish-prod
+
+---
+kind: pipeline
+type: kubernetes
+name: deploy-staging
+
+depends_on:
+  - publish-amd64
+  - publish-arm64
+
+concurrency:
+  limit: 1
+
+trigger:
+  branch: [master]
+  event: [push]
+
+steps:
+  - name: deploy
+
+---
+kind: pipeline
+type: kubernetes
+name: deploy-prod
+
+concurrency:
+  limit: 1
+
+trigger:
+  event: [promote]
+  target: [prod]
+
+steps:
+  - name: deploy
+
+---
+kind: pipeline
+type: kubernetes
+name: publish-uat-amd64
+platform:
+  arch: amd64
+
+trigger:
+  event: [promote]
+  target: [uat-*]
+
+steps:
+  - name: snyk
+
+  - name: publish-staging
+
+---
+kind: pipeline
+type: kubernetes
+name: publish-uat-arm64
+platform:
+  arch: arm64
+
+trigger:
+  event: [promote]
+  target: [uat-*]
+
+steps:
+  - name: publish-staging
+
+---
+kind: pipeline
+type: kubernetes
+name: deploy-uat
+
+depends_on:
+  - publish-uat-arm64
+  - publish-uat-amd64
+
+trigger:
+  event: [promote]
+  target: [uat-*]
+
+steps:
+  - name: deploy
+
+---
+kind: pipeline
+type: kubernetes
+name: uninstall-uat
+
+trigger:
+  event: [rollback]
+  target: [uat-*]
+
+steps:
+  - name: uninstall
