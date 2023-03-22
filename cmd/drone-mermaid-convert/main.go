@@ -18,11 +18,67 @@ type Trigger struct {
 }
 
 type Pipeline struct {
-	Name      string   `yaml:"name"`
-	Kind      string   `yaml:"kind"`
-	Trigger   *Trigger `yaml:"trigger"`
-	Steps     []*Step  `yaml:"steps"`
-	DependsOn []string `yaml:"depends_on"`
+	Name      string     `yaml:"name"`
+	Kind      string     `yaml:"kind"`
+	Trigger   conditions `yaml:"trigger"`
+	Steps     []*Step    `yaml:"steps"`
+	DependsOn []string   `yaml:"depends_on"`
+}
+
+type conditions struct {
+	Paths  condition              `yaml:"paths,omitempty"`
+	Branch condition              `yaml:"branch"`
+	Event  condition              `yaml:"event"`
+	Target stringCondition        `yaml:"target"`
+	Attrs  map[string]interface{} `yaml:",inline"`
+}
+
+type condition struct {
+	Exclude []string `yaml:"exclude,omitempty"`
+	Include []string `yaml:"include,omitempty"`
+}
+
+type stringCondition struct {
+	Attrs []string `yaml:",inline"`
+}
+
+func (s *stringCondition) UnmarshalYAML(unmarshal func(interface{}) error) error {
+	var out1 string
+	var out2 []string
+
+	if err := unmarshal(&out1); err == nil {
+		s.Attrs = []string{out1}
+		return nil
+	}
+
+	_ = unmarshal(&out2)
+	s.Attrs = append(s.Attrs, out2...)
+	return nil
+}
+
+// inspired from https://github.com/meltwater/drone-convert-pathschanged/blob/master/plugin/plugin.go
+// also needed to support those using the pathschantged extension within their drone manifests.
+// TODO - maybe there is way to support drone conversion extensions as plugins for this rendering?
+func (c *condition) UnmarshalYAML(unmarshal func(interface{}) error) error {
+	var out1 string
+	var out2 []string
+	var out3 = struct {
+		Include []string
+		Exclude []string
+	}{}
+
+	if err := unmarshal(&out1); err == nil {
+		c.Include = []string{out1}
+		return nil
+	}
+
+	_ = unmarshal(&out2)
+	_ = unmarshal(&out3)
+
+	c.Exclude = out3.Exclude
+	c.Include = append(out3.Include, out2...)
+
+	return nil
 }
 
 type Step struct {
@@ -71,22 +127,24 @@ func main() {
 	diagrames := []*statediagram.State{}
 
 	for _, p := range drone.Pipelines {
-
+		if p.Name == "default" {
+			p.Name = "defaultPipeline"
+		}
 		b := strings.Builder{}
-		if len(p.Trigger.Branch) > 0 {
-			b.WriteString(strings.Join(p.Trigger.Branch, " "))
+		if len(p.Trigger.Branch.Include) > 0 {
+			b.WriteString(strings.Join(p.Trigger.Branch.Include, " "))
 		}
 
-		if len(p.Trigger.Target) > 0 {
-			b.WriteString(strings.Join(p.Trigger.Target, " "))
+		if len(p.Trigger.Target.Attrs) > 0 {
+			b.WriteString(strings.Join(p.Trigger.Target.Attrs, " "))
 		}
 
-		if (len(p.Trigger.Branch) > 0 || len(p.Trigger.Target) > 0) && len(p.Trigger.Event) > 0 {
+		if (len(p.Trigger.Branch.Include) > 0 || len(p.Trigger.Target.Attrs) > 0) && len(p.Trigger.Event.Include) > 0 {
 			b.WriteString(" <- ")
 		}
 
-		if len(p.Trigger.Event) > 0 {
-			b.WriteString(strings.Join(p.Trigger.Event, " "))
+		if len(p.Trigger.Event.Include) > 0 {
+			b.WriteString(strings.Join(p.Trigger.Event.Include, " "))
 		}
 
 		stateD := &statediagram.State{
